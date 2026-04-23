@@ -144,6 +144,32 @@ def load_all_sessions(days=None):
         _cache[cid] = parsed
         seen[cid] = parsed
 
+    # kiro-cli 2.0.1+ uses the v1 conversations table (key=cwd, value=JSON)
+    for row in query(CLI_DB, "SELECT key as cwd, value FROM conversations"):
+        try:
+            data = json.loads(row["value"])
+        except Exception:
+            continue
+        cid = data.get("conversation_id")
+        if not cid:
+            continue
+        turns = data.get("history", [])
+        if not turns:
+            continue
+        first_ts = (turns[0].get("request_metadata") or {}).get("request_start_timestamp_ms")
+        last_ts = (turns[-1].get("request_metadata") or {}).get("request_start_timestamp_ms")
+        created_at = first_ts or 0
+        updated_at = last_ts or first_ts or 0
+        if cutoff_ms and updated_at < cutoff_ms:
+            continue
+        if cid in _cache and _cache[cid]["_updated_at"] == updated_at:
+            seen[cid] = _cache[cid]
+            continue
+        parsed = parse_conversation(cid, row["cwd"], created_at, updated_at, data)
+        parsed["_updated_at"] = updated_at
+        _cache[cid] = parsed
+        seen[cid] = parsed
+
     return sorted(seen.values(), key=lambda x: x["updated"], reverse=True)
 
 # ── Load IDE usage (Kiro IDE token data) ──────────────────────────────────────
@@ -358,6 +384,13 @@ def render_session(prefix):
     for row in query(CLI_DB, "SELECT conversation_id, key as cwd, value FROM conversations_v2"):
         if row["conversation_id"].startswith(prefix):
             data, cid, cwd = json.loads(row["value"]), row["conversation_id"], row["cwd"]
+    for row in query(CLI_DB, "SELECT key as cwd, value FROM conversations"):
+        try:
+            d = json.loads(row["value"])
+        except Exception:
+            continue
+        if d.get("conversation_id", "").startswith(prefix):
+            data, cid, cwd = d, d["conversation_id"], row["cwd"]
 
     if not data:
         return "No session found matching '{}'".format(prefix)

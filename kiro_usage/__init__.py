@@ -126,5 +126,7 @@ def query(db_path, sql, params=()):
     conn.row_factory = sqlite3.Row
     try:
         return conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        return []
     finally:
         conn.close()

@@ -14,12 +14,13 @@ def ensure_sessions_dir():
 def archive_sessions():
     """Snapshot all live conversations from the CLI DB into ~/.kiro_sessions/."""
     ensure_sessions_dir()
-    rows = query(CLI_DB, """
+    archived = 0
+
+    # Archive from conversations_v2 (kiro-cli < 2.0.1)
+    for row in query(CLI_DB, """
         SELECT conversation_id, key as cwd, created_at, updated_at, value
         FROM conversations_v2
-    """)
-    archived = 0
-    for row in rows:
+    """):
         path = SESSIONS_DIR / "{}.json".format(row["conversation_id"])
         if path.exists():
             try:
@@ -37,6 +38,41 @@ def archive_sessions():
         }
         path.write_text(json.dumps(snapshot, separators=(",", ":")))
         archived += 1
+
+    # Archive from conversations v1 (kiro-cli 2.0.1+)
+    for row in query(CLI_DB, "SELECT key as cwd, value FROM conversations"):
+        try:
+            data = json.loads(row["value"])
+        except Exception:
+            continue
+        cid = data.get("conversation_id")
+        if not cid:
+            continue
+        turns = data.get("history", [])
+        if not turns:
+            continue
+        first_ts = (turns[0].get("request_metadata") or {}).get("request_start_timestamp_ms", 0)
+        last_ts = (turns[-1].get("request_metadata") or {}).get("request_start_timestamp_ms", 0)
+        created_at = first_ts or 0
+        updated_at = last_ts or first_ts or 0
+        path = SESSIONS_DIR / "{}.json".format(cid)
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text())
+                if existing.get("updated_at", 0) >= updated_at:
+                    continue
+            except (json.JSONDecodeError, KeyError):
+                pass
+        snapshot = {
+            "conversation_id": cid,
+            "cwd": row["cwd"],
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "value": data,
+        }
+        path.write_text(json.dumps(snapshot, separators=(",", ":")))
+        archived += 1
+
     return archived
 
 def load_archived_sessions(cutoff_ms=None):
