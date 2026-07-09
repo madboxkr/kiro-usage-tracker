@@ -78,17 +78,30 @@ def archive_sessions():
 
     return archived
 
+_archive_cache = {}  # path -> (mtime, parsed_data)
+
 def load_archived_sessions(cutoff_ms=None):
-    """Load all snapshots from ~/.kiro_sessions/."""
+    """Load all snapshots from ~/.kiro_sessions/ with mtime-based caching."""
     ensure_sessions_dir()
     sessions = []
     for path in SESSIONS_DIR.glob("*.json"):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
         if cutoff_ms:
-            mtime_ms = int(path.stat().st_mtime * 1000)
+            mtime_ms = int(mtime * 1000)
             if mtime_ms < cutoff_ms:
                 continue
+        # Use cached parse if file hasn't changed
+        cached = _archive_cache.get(path)
+        if cached and cached[0] == mtime:
+            sessions.append(cached[1])
+            continue
         try:
-            sessions.append(json.loads(path.read_text()))
+            data = json.loads(path.read_text())
+            _archive_cache[path] = (mtime, data)
+            sessions.append(data)
         except (json.JSONDecodeError, OSError):
             continue
     return sessions
