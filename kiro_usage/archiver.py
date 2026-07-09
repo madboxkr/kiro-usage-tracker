@@ -51,6 +51,9 @@ def archive_sessions():
         turns = data.get("history", [])
         if not turns:
             continue
+        # Skip if turns contain non-dict items (incompatible schema)
+        if not isinstance(turns[0], dict):
+            continue
         first_ts = (turns[0].get("request_metadata") or {}).get("request_start_timestamp_ms", 0)
         last_ts = (turns[-1].get("request_metadata") or {}).get("request_start_timestamp_ms", 0)
         created_at = first_ts or 0
